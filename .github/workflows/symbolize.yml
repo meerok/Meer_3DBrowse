@@ -1,0 +1,30 @@
+name: Look up crash address
+
+# Run this from the Actions tab with the PC / LR values from the Luma3DS crash screen.
+# It rebuilds the app and prints which function and source line each address belongs to.
+
+on:
+  workflow_dispatch:
+    inputs:
+      addresses:
+        description: "Addresses from the crash screen, separated by spaces (e.g. 0x00123456 0x00100abc)"
+        required: true
+
+jobs:
+  lookup:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install 3DS libraries
+        run: dkp-pacman -S --noconfirm --needed 3ds-curl 3ds-mbedtls 3ds-zlib || echo "package server unavailable, using libraries already in the image"
+      - name: Build
+        run: make
+      - name: Look up addresses
+        env:
+          ADDRS: ${{ inputs.addresses }}
+        run: |
+          for a in $ADDRS; do
+            echo "== $a"
+            "$DEVKITARM/bin/arm-none-eabi-addr2line" -f -C -i -p -e 3DBrowse.elf "$a"
+          done
