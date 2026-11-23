@@ -1,0 +1,2 @@
+3DBrowse by Meer - files bundled into the app.
+cacert.pem (the HTTPS root certificates) is downloaded at build time.
