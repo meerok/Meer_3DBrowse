@@ -1,0 +1,90 @@
+name: Build 3DBrowse
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm:latest
+    steps:
+      # git has to be installed before checkout so the generated artwork can be committed back
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Install 3DS libraries (curl, mbedtls, zlib)
+        run: dkp-pacman -S --noconfirm --needed 3ds-curl 3ds-mbedtls 3ds-zlib || echo "package server unavailable, using libraries already in the image"
+
+      - name: Install build tools
+        run: |
+          apt-get install -y --no-install-recommends wget unzip gcc libc6-dev python3 python3-pil python3-qrcode fonts-dejavu-core
+          apt-get install -y --no-install-recommends fonts-inter || echo "Inter font not available, using DejaVu"
+          mkdir -p /tmp/tools && cd /tmp/tools
+          wget -q https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.4/makerom-v0.18.4-ubuntu_x86_64.zip -O makerom.zip
+          unzip -o -q makerom.zip -d makerom
+          install -m755 "$(find makerom -type f -name makerom | head -n1)" /usr/local/bin/makerom
+          wget -q https://github.com/diasurgical/bannertool/releases/download/1.2.0/bannertool.zip -O bannertool.zip
+          unzip -o -q bannertool.zip -d bannertool
+          install -m755 "$(find bannertool -type f -path '*linux-x86_64*' -name bannertool | head -n1)" /usr/local/bin/bannertool
+
+      - name: Generate artwork (icon, banner, jingle, QR code, preview)
+        run: make assets
+
+      - name: Bundle HTTPS root certificates
+        run: |
+          wget -q https://curl.se/ca/cacert.pem -O romfs/cacert.pem || cp /etc/ssl/certs/ca-certificates.crt romfs/cacert.pem
+          ls -la romfs
+
+      - name: Build .3dsx and .cia
+        run: make cia
+
+      - name: Commit generated artwork
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "meerok"
+          git config user.email "234498539+meerok@users.noreply.github.com"
+          git add assets/icon.png assets/banner.png assets/banner.wav assets/qr.png preview.png
+          if ! git diff --cached --quiet; then
+            git commit -m "Update generated artwork [skip ci]"
+            git push || echo "could not push artwork"
+          fi
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3DBrowse
+          path: |
+            3DBrowse.cia
+            3DBrowse.3dsx
+
+      # Keeps https://github.com/meerok/Meer_3DBrowse/releases/latest/download/3DBrowse.cia
+      # (the link in the QR code) pointing at the newest build.
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: 3DBrowse v1.0.0
+          make_latest: true
+          overwrite_files: true
+          body: |
+            **3DBrowse by Meer** - a fast, text-first web browser for the Nintendo 3DS.
+
+            **Install:** open FBI > Remote Install > Scan QR Code and scan the code in the README, or copy `3DBrowse.cia` to your SD card and install it with FBI.
+            **Homebrew Launcher:** copy `3DBrowse.3dsx` to `sdmc:/3ds/`.
+
+            - Pages load on a background thread, so scrolling stays smooth while they download
+            - One continuous page across both screens; tap links on the touch screen
+            - Search, forms and logins (GET/POST, cookies saved between sessions)
+            - Bookmarks, history, back/forward with instant cached pages
+            - Light and dark themes, three text sizes, Reader view
+            - HTTPS with bundled root certificates
+          files: |
+            3DBrowse.cia
+            3DBrowse.3dsx
